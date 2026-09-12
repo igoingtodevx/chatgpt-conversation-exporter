@@ -1,5 +1,18 @@
 import { normalizeWhitespace } from "../shared/utils";
 
+const LANGUAGE_LABELS: Record<string, string> = {
+  javascript: "javascript", js: "javascript",
+  typescript: "typescript", ts: "typescript",
+  python: "python", py: "python",
+  bash: "bash", shell: "bash", sh: "bash", zsh: "bash",
+  json: "json", yaml: "yaml", yml: "yaml", xml: "xml",
+  html: "html", css: "css", sql: "sql",
+  java: "java", go: "go", rust: "rust",
+  c: "c", "c++": "cpp", cpp: "cpp", "c#": "csharp", csharp: "csharp",
+  php: "php", ruby: "ruby", swift: "swift", kotlin: "kotlin",
+  markdown: "markdown", md: "markdown", text: "text", plaintext: "text"
+};
+
 function inline(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
@@ -59,6 +72,22 @@ function tableToMarkdown(table: HTMLElement): string {
   return output.map((row) => `| ${row.join(" | ")} |`).join("\n");
 }
 
+function preLanguage(element: HTMLElement, code: HTMLElement): string {
+  const classLanguage = Array.from(code.classList).find((name) => name.startsWith("language-"))?.slice(9);
+  if (classLanguage) return classLanguage;
+
+  // ChatGPT's current code viewer often renders the language as a short sibling label
+  // (for example "JavaScript") instead of a language-* class on <code>.
+  for (const candidate of Array.from(element.querySelectorAll("*")) as HTMLElement[]) {
+    if (candidate === code || code.contains(candidate) || candidate.contains(code)) continue;
+    const label = normalizeWhitespace(candidate.textContent || "");
+    if (!label || label.length > 32) continue;
+    const normalized = LANGUAGE_LABELS[label.toLowerCase()];
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
 function block(element: HTMLElement): string {
   const tag = element.tagName.toLowerCase();
   if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${normalizeWhitespace(inline(element))}`;
@@ -67,7 +96,7 @@ function block(element: HTMLElement): string {
   if (tag === "blockquote") return normalizeWhitespace(blocksToMarkdown(element)).split("\n").map((line) => `> ${line}`).join("\n");
   if (tag === "pre") {
     const code = (element.querySelector("code") as HTMLElement | null) || element;
-    const language = Array.from(code.classList).find((name) => name.startsWith("language-"))?.slice(9) || "";
+    const language = preLanguage(element, code);
     return `\`\`\`${language}\n${(code.textContent || "").replace(/\n$/, "")}\n\`\`\``;
   }
   if (tag === "table") return tableToMarkdown(element);
