@@ -93,6 +93,14 @@ function isUiLink(url: string): boolean {
   }
 }
 
+function isElementVisible(element: HTMLElement): boolean {
+  if (element.hidden || element.closest('[hidden], [aria-hidden="true"]')) return false;
+  const style = getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number(style.opacity) === 0) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
 function cleanLinkText(value: string, fallback: string): string {
   const text = normalizeWhitespace(value || fallback)
     .replace(/\n\+\d+$/g, "")
@@ -104,18 +112,25 @@ function collectLinks(root: Element): LinkRef[] {
   const links = Array.from(root.querySelectorAll("a[href]"))
     .map((node) => {
       const anchor = node as HTMLAnchorElement;
-      const url = anchor.href || anchor.getAttribute("href") || "";
+      if (!isElementVisible(anchor)) return null;
+      const rawHref = anchor.getAttribute("href") || anchor.href || "";
+      const url = rawHref ? (() => {
+        try { return new URL(rawHref, location.href).href; } catch { return rawHref; }
+      })() : "";
       if (!url || isUiLink(url)) return null;
-      const marker = `${anchor.dataset.testid || ""} ${anchor.getAttribute("aria-label") || ""}`;
-      const attachmentish = Boolean(anchor.download) || /download|attachment|file/i.test(marker);
+      const text = cleanLinkText(anchor.innerText || anchor.textContent || "", url);
+      const marker = `${anchor.dataset.testid || ""} ${anchor.getAttribute("aria-label") || ""} ${anchor.getAttribute("download") || ""}`;
+      const attachmentish = Boolean(anchor.download) || /download|attachment|file/i.test(marker) || FILE_NAME_PATTERN.test(`${text} ${url}`);
       const citationish = /citation|source/i.test(marker);
       return {
-        text: cleanLinkText(anchor.innerText || anchor.textContent || "", url),
+        text,
         url,
         kind: attachmentish ? "attachment" : citationish ? "citation" : "link"
       } as LinkRef;
     })
-    .filter((item): item is LinkRef => Boolean(item && /^(https?:|blob:|data:)/i.test(item.url)));
+    .filter((item): item is LinkRef => Boolean(item && (
+      /^(https?:|blob:|data:)/i.test(item.url) || (item.kind === "attachment" && /^sandbox:/i.test(item.url))
+    )));
   return uniqueBy(links, (item) => `${item.kind}:${item.url}`);
 }
 
@@ -150,7 +165,7 @@ function fileWidgetName(element: HTMLElement): string {
 
 function widgetUrl(element: HTMLElement): string {
   const anchor = element.matches("a[href]") ? element as HTMLAnchorElement : element.querySelector("a[href]") as HTMLAnchorElement | null;
-  const candidate = anchor?.href || element.getAttribute("data-href") || element.getAttribute("data-url") || "";
+  const candidate = anchor?.getAttribute("href") || anchor?.href || element.getAttribute("data-href") || element.getAttribute("data-url") || "";
   try {
     return candidate ? new URL(candidate, location.href).href : "";
   } catch {
@@ -163,7 +178,7 @@ async function collectAssets(root: Element, captureImages: boolean): Promise<Ass
   const images = Array.from(root.querySelectorAll("img")) as HTMLImageElement[];
   for (const img of images) {
     const url = img.currentSrc || img.src || "";
-    if (!url || url.startsWith("data:image/svg") || isUiImage(img, url)) continue;
+    if (!url || !isElementVisible(img) || url.startsWith("data:image/svg") || isUiImage(img, url)) continue;
     const dataUrl = captureImages ? await tryDataUrl(url, true) : null;
     assets.push({
       id: `image-${crypto.randomUUID()}`,
@@ -179,6 +194,7 @@ async function collectAssets(root: Element, captureImages: boolean): Promise<Ass
 
   for (const link of collectLinks(root).filter((item) => item.kind === "attachment")) {
     const dataUrl = await tryDataUrl(link.url);
+    const retrievable = /^(https?:|blob:|data:)/i.test(link.url);
     assets.push({
       id: `attachment-${crypto.randomUUID()}`,
       kind: "attachment",
@@ -187,7 +203,7 @@ async function collectAssets(root: Element, captureImages: boolean): Promise<Ass
       url: link.url,
       alt: null,
       dataUrl,
-      status: dataUrl ? "embedded" : "remote"
+      status: dataUrl ? "embedded" : (retrievable ? "remote" : "unavailable")
     });
   }
 
@@ -197,13 +213,15 @@ async function collectAssets(root: Element, captureImages: boolean): Promise<Ass
   ].join(",");
   const widgets = Array.from(root.querySelectorAll(widgetSelector)) as HTMLElement[];
   for (const widget of widgets) {
+    if (!isElementVisible(widget)) continue;
     const marker = `${widget.dataset.testid || ""} ${widget.getAttribute("aria-label") || ""} ${widget.getAttribute("data-filename") || ""} ${widget.innerText || ""}`;
-    if (!FILE_NAME_PATTERN.test(marker) && !/download|attachment/i.test(marker)) continue;
     const name = fileWidgetName(widget);
-    if (!name || (!FILE_NAME_PATTERN.test(name) && !/download|attachment/i.test(marker))) continue;
+    const explicitlyNamed = Boolean(widget.getAttribute("data-filename"));
+    if (!name || (!FILE_NAME_PATTERN.test(name) && !explicitlyNamed)) continue;
     const url = widgetUrl(widget);
     if (url && isUiLink(url)) continue;
     const dataUrl = url ? await tryDataUrl(url) : null;
+    const retrievable = /^(https?:|blob:|data:)/i.test(url);
     assets.push({
       id: `attachment-${crypto.randomUUID()}`,
       kind: "attachment",
@@ -212,7 +230,7 @@ async function collectAssets(root: Element, captureImages: boolean): Promise<Ass
       url,
       alt: null,
       dataUrl,
-      status: dataUrl ? "embedded" : (url ? "remote" : "unavailable")
+      status: dataUrl ? "embedded" : (retrievable ? "remote" : "unavailable")
     });
   }
 
@@ -226,8 +244,14 @@ function detailType(title: string): DetailSection["type"] {
   return "unknown";
 }
 
-async function expandInspectableSections(turn: HTMLElement, enabled: boolean): Promise<{ restore: () => void; expanded: number }> {
-  if (!enabled) return { restore: () => {}, expanded: 0 };
+interface ExpansionCapture {
+  restore: () => void;
+  expanded: number;
+  elements: HTMLElement[];
+}
+
+async function expandInspectableSections(turn: HTMLElement, enabled: boolean): Promise<ExpansionCapture> {
+  if (!enabled) return { restore: () => {}, expanded: 0, elements: [] };
   const changed: HTMLElement[] = [];
   const candidates = Array.from(turn.querySelectorAll('button[aria-expanded="false"], [role="button"][aria-expanded="false"]')) as HTMLElement[];
   for (const element of candidates) {
@@ -243,8 +267,9 @@ async function expandInspectableSections(turn: HTMLElement, enabled: boolean): P
   }
   return {
     expanded: changed.length,
+    elements: changed,
     restore: () => {
-      for (const element of changed.reverse()) {
+      for (const element of changed.slice().reverse()) {
         if (element.getAttribute("aria-expanded") === "true") {
           try { element.click(); } catch { /* no-op */ }
         }
@@ -253,19 +278,39 @@ async function expandInspectableSections(turn: HTMLElement, enabled: boolean): P
   };
 }
 
-function collectDetails(turn: HTMLElement, primaryRoot: Element): DetailSection[] {
+function detailFromNode(node: HTMLElement, title: string): DetailSection | null {
+  const text = normalizeWhitespace(node.innerText || node.textContent || "");
+  if (!text || text.length < 2) return null;
+  const clone = sanitizedClone(node);
+  return { type: detailType(title), title, text, html: clone.innerHTML };
+}
+
+function collectDetails(turn: HTMLElement, primaryRoot: Element, expandedElements: HTMLElement[] = []): DetailSection[] {
   const results: DetailSection[] = [];
   const candidates = Array.from(turn.querySelectorAll("details, [data-testid], [aria-label], [role='region']")) as HTMLElement[];
   for (const node of candidates) {
     if (node === primaryRoot || primaryRoot.contains(node) || node.contains(primaryRoot)) continue;
     const marker = `${node.dataset.testid || ""} ${node.getAttribute("aria-label") || ""} ${node.querySelector("summary")?.textContent || ""}`;
     if (!DETAIL_PATTERN.test(marker)) continue;
-    const text = normalizeWhitespace(node.innerText || node.textContent || "");
-    if (!text || text.length < 2) continue;
     const title = normalizeWhitespace(node.querySelector("summary")?.textContent || node.getAttribute("aria-label") || marker).slice(0, 160);
-    const clone = sanitizedClone(node);
-    results.push({ type: detailType(title), title, text, html: clone.innerHTML });
+    const detail = detailFromNode(node, title);
+    if (detail) results.push(detail);
   }
+
+  for (const trigger of expandedElements) {
+    const title = normalizeWhitespace(`${trigger.getAttribute("aria-label") || ""} ${trigger.innerText || trigger.textContent || ""}`).slice(0, 160);
+    if (!title || !DETAIL_PATTERN.test(title)) continue;
+    let container: HTMLElement | null = trigger.parentElement;
+    for (let depth = 0; container && depth < 4; depth += 1, container = container.parentElement) {
+      if (container === turn || container === primaryRoot || primaryRoot.contains(container) || container.contains(primaryRoot)) continue;
+      const text = normalizeWhitespace(container.innerText || container.textContent || "");
+      if (!text || text === title || text.length <= title.length + 2 || text.length > 20000) continue;
+      const detail = detailFromNode(container, title);
+      if (detail) results.push(detail);
+      break;
+    }
+  }
+
   return uniqueBy(results, (item) => `${item.type}:${item.title}:${item.text.slice(0, 100)}`);
 }
 
@@ -292,7 +337,7 @@ async function extractTurn(turn: HTMLElement, index: number, options: Extraction
     const text = normalizeWhitespace((primaryRoot as HTMLElement).innerText || primaryRoot.textContent || "");
     const links = collectLinks(turn);
     const assets = await collectAssets(turn, options.captureImages);
-    const details = collectDetails(turn, primaryRoot).filter((item) => {
+    const details = collectDetails(turn, primaryRoot, expansion.elements).filter((item) => {
       if (item.type === "reasoning") return options.includeReasoning;
       if (item.type === "tool" || item.type === "research") return options.includeTools;
       return options.includeTools || options.includeReasoning;
@@ -357,7 +402,8 @@ function mergeWithMetadata(domMessages: ConversationMessage[], metadata: Metadat
       ...message,
       source: "merged" as const,
       createdAt: meta.createdAt || message.createdAt,
-      model: message.model || meta.model
+      model: message.model || meta.model,
+      assets: uniqueBy([...message.assets, ...meta.assets], (asset) => `${asset.kind}:${asset.url || asset.name || asset.id}`)
     };
   });
   for (const meta of fallback) if (!used.has(meta.id)) merged.push(meta);
@@ -462,7 +508,7 @@ export async function extractConversation(options: ExtractionOptions): Promise<C
 
   return {
     schemaVersion: "1.1",
-    generator: { name: "ChatGPT Conversation Exporter", version: "0.2.0" },
+    generator: { name: "ChatGPT Conversation Exporter", version: "0.3.0" },
     conversation: {
       title: metadata?.title || pageTitle(),
       url: location.href,
