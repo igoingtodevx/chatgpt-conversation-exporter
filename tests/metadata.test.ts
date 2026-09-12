@@ -67,6 +67,37 @@ describe("ChatGPT metadata classification", () => {
     expect(assets[0]).toMatchObject({ kind: "attachment", name: "report.pdf", mimeType: "application/pdf", status: "unavailable" });
   });
 
+  it("rejects ordinary web-search results even when titles and URLs look like files", () => {
+    const raw = message("assistant", "Search results", {
+      metadata: {
+        search_result_groups: [{
+          entries: [
+            {
+              title: "setup-node/README.md at main · actions/setup-node · GitHub",
+              url: "https://github.com/actions/setup-node/blob/main/README.md?utm_source=chatgpt.com"
+            },
+            {
+              title: "advanced-usage.md",
+              href: "https://github.com/actions/setup-node/blob/main/docs/advanced-usage.md"
+            }
+          ]
+        }]
+      }
+    });
+    expect(metadataAssets({ id: "a-search", message: raw })).toEqual([]);
+  });
+
+  it("still accepts explicit filename plus URL metadata without a mime type", () => {
+    const raw = message("assistant", "Generated file", {
+      metadata: {
+        attachments: [{ filename: "build.zip", url: "https://example.com/build.zip" }]
+      }
+    });
+    const assets = metadataAssets({ id: "a-file", message: raw });
+    expect(assets).toHaveLength(1);
+    expect(assets[0]).toMatchObject({ name: "build.zip", url: "https://example.com/build.zip", status: "remote" });
+  });
+
   it("does not stringify empty text payloads into tool-trace noise", () => {
     const mapping: MetadataConversation["mapping"] = {
       call: {
