@@ -41,7 +41,7 @@ It **does not** try to expose hidden chain-of-thought, system/developer prompts,
 
 ## Why tool calls are not normal messages
 
-A real ChatGPT Work/Connector conversation contains metadata records for internal tool invocations between visible replies. Earlier builds could mistake those records for ordinary assistant messages. Since v0.2, the readable transcript contains only the visible conversation while `chat.json` retains tool calls/results under `toolTrace[]` for agents that need the execution history.
+A real ChatGPT Work/Connector conversation contains metadata records for internal tool invocations between visible replies. Earlier builds could mistake those records for ordinary assistant messages. Since v0.2, the readable transcript contains only the visible conversation while `chat.json` retains tool calls/results under `toolTrace[]` for agents that need the execution history. Since v0.3.2, assistant progress records explicitly marked by ChatGPT as non-final are also kept out of the top-level transcript so they are not duplicated when the same visible progress is captured inside reasoning/details.
 
 That gives both sides what they need:
 
@@ -82,7 +82,7 @@ Then either:
 3. choose **Load unpacked**;
 4. select the generated `dist/` directory.
 
-Or unzip `release/chatgpt-conversation-exporter-v0.3.1.zip` and load that directory.
+Or unzip `release/chatgpt-conversation-exporter-v0.3.2.zip` and load that directory.
 
 ## Usage
 
