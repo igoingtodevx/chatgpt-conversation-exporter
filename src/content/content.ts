@@ -65,7 +65,7 @@ if (!window.__chatgptExporterInstalled) {
         const data = await extractConversation(options);
         const pruned = prunePseudoAttachments(data);
         if (pruned) {
-          data.diagnostics.warnings.push(`Filtered ${pruned} status UI element(s) that looked like file attachments.`);
+          data.diagnostics.warnings.push(`Filtered ${pruned} redundant or status-like UI asset record(s).`);
         }
         if (options.captureImages) await embedRemoteAttachments(data);
         sendResponse({ ok: true, data } satisfies ExtractResponse);
