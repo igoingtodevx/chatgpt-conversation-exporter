@@ -26,7 +26,7 @@ The browser always opens **Save As**.
 - user-visible user and assistant messages;
 - structured tool calls/results in a separate `toolTrace[]` inside `chat.json`;
 - Markdown structure, headings, lists, blockquotes and tables;
-- code blocks and inline code;
+- code blocks, visible language labels and inline code;
 - links, citations and full URLs;
 - images and attachments, with local embedding when the browser can access them;
 - file/download widgets plus attachment metadata from the selected visible branch;
@@ -35,7 +35,7 @@ The browser always opens **Save As**.
 - message IDs, turn IDs, model names and timestamps when available;
 - explicit diagnostics when something cannot be recovered.
 
-UI-only chrome such as favicons, app/plugin icons, hidden tool widgets and plugin-pill links is filtered from conversation assets/sources. When an asset is embedded in an AI/Complete archive, `chat.md` points to the local `assets/...` copy and `manifest.json` lists the exact files actually present in the ZIP.
+UI-only chrome such as favicons, app/plugin icons, hidden tool widgets, duplicate image-open controls and plugin-pill links is filtered from conversation assets/sources. When an asset is embedded in an AI/Complete archive, `chat.md` points to the local `assets/...` copy and `manifest.json` lists the exact files actually present in the ZIP.
 
 It **does not** try to expose hidden chain-of-thought, system/developer prompts, cookies, tokens, or unrelated invisible context.
 
@@ -82,7 +82,7 @@ Then either:
 3. choose **Load unpacked**;
 4. select the generated `dist/` directory.
 
-Or unzip `release/chatgpt-conversation-exporter-v0.3.2.zip` and load that directory.
+Or unzip `release/chatgpt-conversation-exporter-v1.0.0.zip` and load that directory.
 
 ## Usage
 
@@ -91,6 +91,10 @@ Or unzip `release/chatgpt-conversation-exporter-v0.3.2.zip` and load that direct
 3. Choose Complete Archive, AI Export, or an individual format.
 4. Keep the capture options enabled for maximum fidelity.
 5. Click **Export** and choose where to save the file.
+
+## v1.0 validation
+
+The release candidate was exercised against a frozen real ChatGPT fixture containing an uploaded image, uploaded PDF, Markdown table, JavaScript code block, web research, official links, structured tool calls and a generated downloadable text file. The archive preserved both visible turns with zero missing turns, embedded the accessible image locally, kept inaccessible file cards explicitly marked as unavailable, preserved the tool trace separately, produced a consistent ZIP manifest and rendered a valid A4 PDF.
 
 ## Development
 
