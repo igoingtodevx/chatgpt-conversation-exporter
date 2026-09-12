@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Conversation Exporter",
+  "short_name": "Chat Export",
+  "version": "0.1.0",
+  "description": "Local-first, AI-ready exports of the current ChatGPT conversation to JSON, Markdown, HTML, PDF, or ZIP.",
+  "permissions": ["activeTab", "scripting", "downloads"],
+  "action": {
+    "default_title": "Export ChatGPT conversation",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

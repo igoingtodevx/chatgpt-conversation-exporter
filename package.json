@@ -1,0 +1,26 @@
+{
+  "name": "chatgpt-conversation-exporter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf dist release coverage",
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
+    "test": "vitest run",
+    "check": "tsc --noEmit && npm test && npm run build"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "jspdf": "^4.2.1",
+    "marked": "^18.0.12"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.9",
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.25.9",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.2",
+    "vitest": "^5.0.0"
+  }
+}
