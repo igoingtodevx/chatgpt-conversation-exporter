@@ -82,7 +82,7 @@ Then either:
 3. choose **Load unpacked**;
 4. select the generated `dist/` directory.
 
-Or unzip `release/chatgpt-conversation-exporter-v0.3.0.zip` and load that directory.
+Or unzip `release/chatgpt-conversation-exporter-v0.3.1.zip` and load that directory.
 
 ## Usage
 

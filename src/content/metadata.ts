@@ -112,12 +112,35 @@ function firstString(value: Record<string, unknown>, keys: string[]): string {
 }
 
 function metadataAssetFromObject(value: Record<string, unknown>, fallbackId: string): AssetRef | null {
-  let name = firstString(value, ["name", "filename", "file_name", "display_name", "title"]);
-  let url = firstString(value, ["download_url", "downloadUrl", "url", "href", "asset_url", "assetUrl"]);
+  const fileName = firstString(value, ["filename", "file_name"]);
+  const genericName = firstString(value, ["name", "display_name"]);
+  const title = firstString(value, ["title"]);
+  const downloadUrl = firstString(value, ["download_url", "downloadUrl", "asset_url", "assetUrl"]);
+  const genericUrl = firstString(value, ["url", "href"]);
   const sandboxPath = firstString(value, ["sandbox_path", "sandboxPath"]);
-  if (!url && sandboxPath) url = sandboxPath.startsWith("sandbox:") ? sandboxPath : `sandbox:${sandboxPath}`;
-  const pointer = firstString(value, ["asset_pointer", "assetPointer", "file_id", "fileId", "id"]);
+  const pointer = firstString(value, ["asset_pointer", "assetPointer", "file_id", "fileId"]);
   const mimeType = firstString(value, ["mime_type", "mimeType", "mimetype"]);
+  const objectType = firstString(value, ["type", "kind", "content_type"]);
+
+  // Do not promote arbitrary metadata objects merely because their title/URL happens
+  // to end in a file-like extension (for example web-search results for README.md).
+  // Require at least one attachment-specific signal first.
+  const hasStrongFileSignal = Boolean(
+    fileName ||
+    pointer ||
+    mimeType ||
+    sandboxPath ||
+    downloadUrl ||
+    (genericName && FILE_NAME_PATTERN.test(genericName)) ||
+    /(^|[_-])(file|attachment|image|audio|video)($|[_-])/i.test(objectType)
+  );
+  if (!hasStrongFileSignal) return null;
+
+  let name = fileName
+    || (FILE_NAME_PATTERN.test(genericName) ? genericName : "")
+    || (FILE_NAME_PATTERN.test(title) ? title : "");
+  let url = downloadUrl || genericUrl;
+  if (!url && sandboxPath) url = sandboxPath.startsWith("sandbox:") ? sandboxPath : `sandbox:${sandboxPath}`;
 
   if (!name && url) {
     try {
@@ -126,7 +149,7 @@ function metadataAssetFromObject(value: Record<string, unknown>, fallbackId: str
   }
 
   const marker = `${name} ${url} ${mimeType}`;
-  if (!FILE_NAME_PATTERN.test(marker) && !/^(image|audio|video|application\/pdf|application\/zip)/i.test(mimeType)) return null;
+  if (!FILE_NAME_PATTERN.test(marker) && !/^(image|audio|video|application\/pdf|application\/zip)/i.test(mimeType) && !pointer && !sandboxPath) return null;
   const kind: AssetRef["kind"] = IMAGE_NAME_PATTERN.test(name) || /^image\//i.test(mimeType) ? "image" : "attachment";
   const retrievable = /^(https?:|blob:|data:)/i.test(url);
   const embedded = /^data:/i.test(url);
