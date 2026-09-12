@@ -17,6 +17,19 @@ function roleName(message: ConversationMessage): string {
   return message.role === "user" ? "You" : message.role === "assistant" ? "ChatGPT" : message.role === "tool" ? "Tool" : "Unknown";
 }
 
+/** jsPDF's built-in Helvetica/Courier fonts are WinAnsi, not full Unicode. */
+export function pdfSafeText(value: string): string {
+  return String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/→/g, "->")
+    .replace(/←/g, "<-")
+    .replace(/↔/g, "<->")
+    .replace(/⇒/g, "=>")
+    .replace(/⇐/g, "<=")
+    .replace(/[✓✔✅]/g, "[check]")
+    .replace(/[✗✘❌]/g, "[x]");
+}
+
 function styleOf(run: InlineRun): PdfStyle {
   if (run.bold && run.italic) return "bolditalic";
   if (run.bold) return "bold";
@@ -81,7 +94,8 @@ export async function exportPdf(data: ConversationExport): Promise<Uint8Array> {
 
   const lineHeight = (size: number, gap: number) => Math.max(4, size * 0.39 + gap);
 
-  const writeLines = (text: string, size = 10.5, indent = 0, font: PdfFont = "helvetica", style: PdfStyle = "normal", gap = 1.3) => {
+  const writeLines = (value: string, size = 10.5, indent = 0, font: PdfFont = "helvetica", style: PdfStyle = "normal", gap = 1.3) => {
+    const text = pdfSafeText(value);
     doc.setFont(font, style);
     doc.setFontSize(size);
     const width = CONTENT_W - indent;
@@ -106,7 +120,7 @@ export async function exportPdf(data: ConversationExport): Promise<Uint8Array> {
     };
     ensure(lineH);
     for (const run of runs) {
-      const parts = String(run.text || "").split(/(\n|\s+)/).filter((part) => part !== "");
+      const parts = pdfSafeText(String(run.text || "")).split(/(\n|\s+)/).filter((part) => part !== "");
       for (const part of parts) {
         if (part === "\n") {
           nextLine();
@@ -144,7 +158,7 @@ export async function exportPdf(data: ConversationExport): Promise<Uint8Array> {
       writeLines(label, 9);
       return;
     }
-    const text = label ? `${label} - ${url}` : url;
+    const text = pdfSafeText(label ? `${label} - ${url}` : url);
     const lines = doc.splitTextToSize(text, CONTENT_W) as string[];
     for (const line of lines) {
       ensure(4.8);
@@ -290,7 +304,7 @@ export async function exportPdf(data: ConversationExport): Promise<Uint8Array> {
     doc.setPage(page);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
-    doc.text(data.conversation.title.slice(0, 80), MARGIN_X, 9);
+    doc.text(pdfSafeText(data.conversation.title.slice(0, 80)), MARGIN_X, 9);
     doc.text(`Page ${page} / ${pages}`, PAGE_W - MARGIN_X, PAGE_H - 8, { align: "right" });
   }
 

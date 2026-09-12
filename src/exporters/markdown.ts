@@ -1,10 +1,27 @@
-import type { ConversationExport, ConversationMessage } from "../shared/types";
+import type { AssetRef, ConversationExport, ConversationMessage } from "../shared/types";
 
 function label(message: ConversationMessage): string {
   if (message.role === "user") return "You";
   if (message.role === "assistant") return "ChatGPT";
   if (message.role === "tool") return "Tool";
   return "Unknown";
+}
+
+function assetLines(asset: AssetRef): string[] {
+  const name = asset.name || asset.alt || asset.id;
+  const local = asset.localPath ? `./${asset.localPath}` : null;
+  if (asset.kind === "image" && local) {
+    const lines = [`![${asset.alt || name}](${local})`];
+    if (asset.url) lines.push(`- Original URL: ${asset.url}`);
+    return lines;
+  }
+  if (local) {
+    const lines = [`- [${name}](${local})`];
+    if (asset.url) lines.push(`  - Original URL: ${asset.url}`);
+    return lines;
+  }
+  if (asset.url) return [`- [${name}](${asset.url})`];
+  return [`- ${name}: [download target unavailable in rendered UI]`];
 }
 
 export function exportMarkdown(data: ConversationExport): string {
@@ -41,10 +58,7 @@ export function exportMarkdown(data: ConversationExport): string {
 
     if (message.assets.length) {
       lines.push("", "### Assets", "");
-      for (const asset of message.assets) {
-        const name = asset.name || asset.alt || asset.id;
-        lines.push(asset.url ? `- ${name}: ${asset.url}` : `- ${name}: [download target unavailable in rendered UI]`);
-      }
+      for (const asset of message.assets) lines.push(...assetLines(asset));
     }
     lines.push("", "---", "");
   }

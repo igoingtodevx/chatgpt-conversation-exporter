@@ -53,11 +53,14 @@ function archiveCopy(data: ConversationExport): { data: ConversationExport; file
     const path = `assets/${String(counter).padStart(3, "0")}-${asset.kind}${extFromAsset(asset)}`;
     files[path] = bytes;
     asset.dataUrl = undefined;
-    (asset as AssetRef & { localPath?: string }).localPath = path;
+    asset.localPath = path;
   }
   for (const message of copy.messages) {
     message.assets = message.assets.map((messageAsset) => {
-      const global = copy.assets.find((asset) => asset.url === messageAsset.url && asset.kind === messageAsset.kind && (asset.url || asset.name === messageAsset.name));
+      const global = copy.assets.find((asset) =>
+        asset.kind === messageAsset.kind &&
+        (asset.url ? asset.url === messageAsset.url : asset.name === messageAsset.name)
+      );
       return global ? { ...messageAsset, ...global } : messageAsset;
     });
   }
@@ -69,26 +72,32 @@ export async function exportArchive(data: ConversationExport, complete: boolean)
   const unresolved = data.assets
     .filter((asset) => asset.status !== "embedded")
     .map((asset) => asset.url || asset.name || asset.id);
+
   const files: Record<string, Uint8Array> = {
     ...archived.files,
     "chat.json": strToU8(exportJson(archived.data)),
-    "chat.md": strToU8(exportMarkdown(archived.data)),
-    "manifest.json": strToU8(JSON.stringify({
-      schemaVersion: data.schemaVersion,
-      exportedAt: data.conversation.exportedAt,
-      title: data.conversation.title,
-      sourceUrl: data.conversation.url,
-      visibleMessages: data.messages.length,
-      toolTraceEvents: data.toolTrace.length,
-      assets: data.assets.length,
-      unresolvedAssets: unresolved,
-      files: complete ? ["chat.json", "chat.md", "chat.html", "chat.pdf", "assets/"] : ["chat.json", "chat.md", "assets/"]
-    }, null, 2))
+    "chat.md": strToU8(exportMarkdown(archived.data))
   };
 
   if (complete) {
     files["chat.html"] = strToU8(exportHtml(data));
     files["chat.pdf"] = await exportPdf(data);
   }
+
+  const manifestFiles = [...Object.keys(files), "manifest.json"].sort();
+  const embeddedAssetFiles = Object.keys(archived.files).sort();
+  files["manifest.json"] = strToU8(JSON.stringify({
+    schemaVersion: data.schemaVersion,
+    exportedAt: data.conversation.exportedAt,
+    title: data.conversation.title,
+    sourceUrl: data.conversation.url,
+    visibleMessages: data.messages.length,
+    toolTraceEvents: data.toolTrace.length,
+    assets: data.assets.length,
+    embeddedAssets: embeddedAssetFiles,
+    unresolvedAssets: unresolved,
+    files: manifestFiles
+  }, null, 2));
+
   return zipSync(files, { level: 6 });
 }

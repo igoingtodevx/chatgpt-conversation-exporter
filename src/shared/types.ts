@@ -14,6 +14,7 @@ export interface AssetRef {
   url: string;
   alt: string | null;
   dataUrl?: string | null;
+  localPath?: string | null;
   status: "embedded" | "remote" | "unavailable";
 }
 
