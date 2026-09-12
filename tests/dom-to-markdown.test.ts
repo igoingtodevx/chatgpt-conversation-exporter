@@ -31,4 +31,17 @@ describe("DOM to Markdown", () => {
     expect(md).toContain("```js");
     expect(md).toContain("| A | B |");
   });
+
+  it("infers the language from ChatGPT's visible code-viewer label", () => {
+    const dom = new JSDOM(`<div id="root"><pre><div><div><div>JavaScript</div></div><div><pre><code>function fibonacci(n) { return n; }</code></pre></div></div></pre></div>`);
+    Object.assign(globalThis, {
+      Node: dom.window.Node,
+      Element: dom.window.Element,
+      HTMLElement: dom.window.HTMLElement,
+      HTMLImageElement: dom.window.HTMLImageElement,
+      HTMLAnchorElement: dom.window.HTMLAnchorElement
+    });
+    const root = dom.window.document.querySelector("#root")!;
+    expect(blocksToMarkdown(root)).toContain("```javascript\nfunction fibonacci(n) { return n; }");
+  });
 });
