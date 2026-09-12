@@ -1,8 +1,10 @@
-import type { ConversationMessage, ToolTraceEvent } from "../shared/types";
-import { normalizeWhitespace } from "../shared/utils";
+import type { AssetRef, ConversationMessage, ToolTraceEvent } from "../shared/types";
+import { normalizeWhitespace, uniqueBy } from "../shared/utils";
 
 const VISIBLE_CONTENT_TYPES = new Set(["text", "multimodal_text", "code"]);
 const HIDDEN_FLAGS = ["is_visually_hidden_from_conversation", "is_hidden", "hidden", "is_redacted"];
+const FILE_NAME_PATTERN = /\.(zip|pdf|docx?|xlsx?|pptx?|csv|tsv|txt|md|json|ya?ml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|java|go|rs|png|jpe?g|webp|gif|svg|mp3|wav|mp4|mov)\b/i;
+const IMAGE_NAME_PATTERN = /\.(png|jpe?g|webp|gif|svg)\b/i;
 
 export interface MetadataMessage {
   id?: string;
@@ -102,6 +104,69 @@ export function isVisibleConversationMessage(raw: MetadataMessage | null | undef
   return Boolean(metadataText({ message: raw }));
 }
 
+function firstString(value: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    if (typeof value[key] === "string" && String(value[key]).trim()) return String(value[key]).trim();
+  }
+  return "";
+}
+
+function metadataAssetFromObject(value: Record<string, unknown>, fallbackId: string): AssetRef | null {
+  let name = firstString(value, ["name", "filename", "file_name", "display_name", "title"]);
+  let url = firstString(value, ["download_url", "downloadUrl", "url", "href", "asset_url", "assetUrl"]);
+  const sandboxPath = firstString(value, ["sandbox_path", "sandboxPath"]);
+  if (!url && sandboxPath) url = sandboxPath.startsWith("sandbox:") ? sandboxPath : `sandbox:${sandboxPath}`;
+  const pointer = firstString(value, ["asset_pointer", "assetPointer", "file_id", "fileId", "id"]);
+  const mimeType = firstString(value, ["mime_type", "mimeType", "mimetype"]);
+
+  if (!name && url) {
+    try {
+      name = decodeURIComponent(new URL(url, "https://chatgpt.com/").pathname.split("/").filter(Boolean).pop() || "");
+    } catch { /* no-op */ }
+  }
+
+  const marker = `${name} ${url} ${mimeType}`;
+  if (!FILE_NAME_PATTERN.test(marker) && !/^(image|audio|video|application\/pdf|application\/zip)/i.test(mimeType)) return null;
+  const kind: AssetRef["kind"] = IMAGE_NAME_PATTERN.test(name) || /^image\//i.test(mimeType) ? "image" : "attachment";
+  const retrievable = /^(https?:|blob:|data:)/i.test(url);
+  const embedded = /^data:/i.test(url);
+  return {
+    id: `metadata-${pointer || fallbackId}`,
+    kind,
+    name: name || null,
+    mimeType: mimeType || null,
+    url,
+    alt: kind === "image" ? (name || null) : null,
+    dataUrl: embedded ? url : null,
+    status: embedded ? "embedded" : (retrievable ? "remote" : "unavailable")
+  };
+}
+
+function collectMetadataAssets(value: unknown, fallbackId: string, depth = 0, out: AssetRef[] = []): AssetRef[] {
+  if (!value || depth > 6) return out;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) collectMetadataAssets(value[i], `${fallbackId}-${i}`, depth + 1, out);
+    return out;
+  }
+  if (typeof value !== "object") return out;
+  const object = value as Record<string, unknown>;
+  const asset = metadataAssetFromObject(object, fallbackId);
+  if (asset) out.push(asset);
+  for (const [key, child] of Object.entries(object)) {
+    if (["text", "content", "parts"].includes(key) && typeof child === "string") continue;
+    if (child && typeof child === "object") collectMetadataAssets(child, `${fallbackId}-${key}`, depth + 1, out);
+  }
+  return out;
+}
+
+export function metadataAssets(node: MetadataNode): AssetRef[] {
+  const raw = node.message;
+  if (!raw || !isVisibleConversationMessage(raw)) return [];
+  const candidates = [raw.metadata, raw.content?.parts];
+  const assets = candidates.flatMap((value, index) => collectMetadataAssets(value, `${raw.id || node.id || "message"}-${index}`));
+  return uniqueBy(assets, (asset) => `${asset.kind}:${asset.url || asset.name || asset.id}`);
+}
+
 export function metadataFallbackMessages(metadata: MetadataConversation): ConversationMessage[] {
   const messages: ConversationMessage[] = [];
   for (const [nodeId, node] of selectedMetadataPath(metadata)) {
@@ -122,7 +187,7 @@ export function metadataFallbackMessages(metadata: MetadataConversation): Conver
       markdown: text,
       renderedHtml: "",
       links: [],
-      assets: [],
+      assets: metadataAssets(node),
       details: [],
       diagnostics: ["Message recovered from ChatGPT conversation metadata because rendered DOM content was unavailable."]
     });
@@ -133,6 +198,7 @@ export function metadataFallbackMessages(metadata: MetadataConversation): Conver
 function traceText(raw: MetadataMessage): string {
   const text = metadataText({ message: raw });
   if (text) return text;
+  if (Array.isArray(raw.content?.parts) && raw.content.parts.every((part) => typeof part !== "string" || !part.trim())) return "";
   try {
     return raw.content ? JSON.stringify(raw.content) : "";
   } catch {
