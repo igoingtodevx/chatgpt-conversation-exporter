@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ChatGPT Export</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>ChatGPT Export</h1>
+        <p id="subtitle">Export the active conversation locally.</p>
+      </div>
+      <span class="badge">local</span>
+    </header>
+
+    <section class="formats" aria-label="Export format">
+      <label><input type="radio" name="format" value="complete" checked><span><strong>Complete Archive</strong><small>JSON + Markdown + HTML + PDF + assets</small></span></label>
+      <label><input type="radio" name="format" value="ai"><span><strong>AI Export</strong><small>JSON + Markdown + assets</small></span></label>
+      <div class="grid">
+        <label><input type="radio" name="format" value="json"><span>JSON</span></label>
+        <label><input type="radio" name="format" value="markdown"><span>Markdown</span></label>
+        <label><input type="radio" name="format" value="html"><span>HTML</span></label>
+        <label><input type="radio" name="format" value="pdf"><span>PDF</span></label>
+      </div>
+    </section>
+
+    <section class="options">
+      <label><input id="reasoning" type="checkbox" checked> Visible reasoning</label>
+      <label><input id="tools" type="checkbox" checked> Tool / research output</label>
+      <label><input id="timestamps" type="checkbox" checked> Timestamps when available</label>
+      <label><input id="images" type="checkbox" checked> Embed images when accessible</label>
+      <label><input id="loadAll" type="checkbox" checked> Load every conversation turn</label>
+    </section>
+
+    <div id="status" role="status">Ready.</div>
+    <button id="export">Export</button>
+    <p class="privacy">No server, analytics, telemetry, or account storage. The extension only gets temporary access to the tab you invoke it on.</p>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
