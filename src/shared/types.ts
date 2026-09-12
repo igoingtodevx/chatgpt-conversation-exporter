@@ -42,17 +42,30 @@ export interface ConversationMessage {
   diagnostics: string[];
 }
 
+export interface ToolTraceEvent {
+  id: string;
+  nodeId: string;
+  kind: "tool_call" | "tool_result";
+  tool: string | null;
+  recipient: string | null;
+  createdAt: string | null;
+  contentType: string | null;
+  text: string;
+  payload: unknown;
+}
+
 export interface ExportDiagnostics {
   extractionSource: "hybrid" | "dom" | "metadata";
   expectedTurns: number | null;
   exportedMessages: number;
   missingTurns: number;
   expandedSections: number;
+  toolTraceEvents: number;
   warnings: string[];
 }
 
 export interface ConversationExport {
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   generator: {
     name: "ChatGPT Conversation Exporter";
     version: string;
@@ -65,6 +78,7 @@ export interface ConversationExport {
     branch: "visible-current";
   };
   messages: ConversationMessage[];
+  toolTrace: ToolTraceEvent[];
   sources: LinkRef[];
   assets: AssetRef[];
   diagnostics: ExportDiagnostics;

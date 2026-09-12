@@ -14,10 +14,14 @@ export function exportMarkdown(data: ConversationExport): string {
     `- Exported: ${data.conversation.exportedAt}`,
     `- Source: ${data.conversation.url}`,
     `- Branch: ${data.conversation.branch}`,
-    `- Messages: ${data.messages.length}`,
+    `- Visible messages: ${data.messages.length}`,
     `- Extraction: ${data.diagnostics.extractionSource}`,
     ""
   ];
+
+  if (data.toolTrace.length) {
+    lines.push(`> ${data.toolTrace.length} structured tool-trace event(s) are preserved in \`chat.json\`. They are intentionally excluded from this human-readable transcript.`, "");
+  }
 
   if (data.diagnostics.warnings.length) {
     lines.push("## Export warnings", "");
@@ -39,7 +43,7 @@ export function exportMarkdown(data: ConversationExport): string {
       lines.push("", "### Assets", "");
       for (const asset of message.assets) {
         const name = asset.name || asset.alt || asset.id;
-        lines.push(`- ${name}: ${asset.url}`);
+        lines.push(asset.url ? `- ${name}: ${asset.url}` : `- ${name}: [download target unavailable in rendered UI]`);
       }
     }
     lines.push("", "---", "");

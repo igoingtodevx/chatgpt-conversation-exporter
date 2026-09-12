@@ -3,8 +3,8 @@ import { exportMarkdown } from "../src/exporters/markdown";
 import type { ConversationExport } from "../src/shared/types";
 
 const fixture: ConversationExport = {
-  schemaVersion: "1.0",
-  generator: { name: "ChatGPT Conversation Exporter", version: "0.1.0" },
+  schemaVersion: "1.1",
+  generator: { name: "ChatGPT Conversation Exporter", version: "0.2.0" },
   conversation: { title: "Test chat", url: "https://chatgpt.com/c/abc", id: "abc", exportedAt: "2026-09-12T16:00:00.000Z", branch: "visible-current" },
   messages: [{
     id: "m1", index: 1, turnId: "t1", messageId: "m1", role: "assistant", model: "gpt-test", createdAt: "2026-09-12T15:59:00.000Z",
@@ -12,17 +12,24 @@ const fixture: ConversationExport = {
     links: [{ text: "Example", url: "https://example.com/a", kind: "citation" }], assets: [],
     details: [{ type: "reasoning", title: "Thinking", text: "Visible summary", html: "<p>Visible summary</p>" }], diagnostics: []
   }],
+  toolTrace: [{
+    id: "tool-1", nodeId: "tool-node-1", kind: "tool_call", tool: "GitHub", recipient: "GitHub", createdAt: "2026-09-12T15:59:30.000Z",
+    contentType: "text", text: "tool payload", payload: { content_type: "text", parts: ["tool payload"] }
+  }],
   sources: [{ text: "Example", url: "https://example.com/a", kind: "citation" }],
   assets: [],
-  diagnostics: { extractionSource: "hybrid", expectedTurns: 1, exportedMessages: 1, missingTurns: 0, expandedSections: 1, warnings: [] }
+  diagnostics: { extractionSource: "hybrid", expectedTurns: 1, exportedMessages: 1, missingTurns: 0, expandedSections: 1, toolTraceEvents: 1, warnings: [] }
 };
 
 describe("Markdown export", () => {
   it("includes metadata, message formatting, visible reasoning and full source URLs", () => {
     const md = exportMarkdown(fixture);
     expect(md).toContain("# Test chat");
+    expect(md).toContain("Visible messages: 1");
     expect(md).toContain("Hello **world**");
     expect(md).toContain("Visible reasoning: Thinking");
     expect(md).toContain("https://example.com/a");
+    expect(md).toContain("1 structured tool-trace event");
+    expect(md).not.toContain("tool payload");
   });
 });

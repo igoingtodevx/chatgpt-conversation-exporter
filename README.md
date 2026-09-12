@@ -23,24 +23,37 @@ The browser always opens **Save As**.
 ## What it captures
 
 - current/selected conversation branch;
-- user and assistant messages;
+- user-visible user and assistant messages;
+- structured tool calls/results in a separate `toolTrace[]` inside `chat.json`;
 - Markdown structure, headings, lists, blockquotes and tables;
 - code blocks and inline code;
 - links, citations and full URLs;
 - images and attachments, with local embedding when the browser can access them;
+- file/download widgets even when ChatGPT exposes only a UI control rather than a normal link;
 - visible tool, connector and research UI content;
 - visible reasoning summaries/details exposed by ChatGPT's UI;
 - message IDs, turn IDs, model names and timestamps when available;
 - explicit diagnostics when something cannot be recovered.
 
-It **does not** try to expose hidden chain-of-thought, system prompts, cookies, tokens, or invisible internal context.
+UI-only chrome such as favicons, app/plugin icons and plugin-pill links is filtered from conversation assets/sources.
+
+It **does not** try to expose hidden chain-of-thought, system/developer prompts, cookies, tokens, or unrelated invisible context.
+
+## Why tool calls are not normal messages
+
+A real ChatGPT Work/Connector conversation contains metadata records for internal tool invocations between visible replies. Earlier builds could mistake those records for ordinary assistant messages. Since v0.2, the readable transcript contains only the visible conversation while `chat.json` retains tool calls/results under `toolTrace[]` for agents that need the execution history.
+
+That gives both sides what they need:
+
+- humans and direct LLM handoffs get a clean `chat.md`, HTML and PDF;
+- programmatic consumers get the exhaustive structured JSON including the tool trace.
 
 ## Long chats
 
 ChatGPT virtualizes long conversations. The exporter combines two approaches:
 
 1. it reads the selected branch from ChatGPT conversation metadata when available;
-2. it walks/scrolls rendered turn shells to hydrate rich DOM content.
+2. it walks the scroll surface in multiple passes and harvests rendered turns as they hydrate.
 
 If a visible user/assistant turn cannot be hydrated, metadata text is used as a marked fallback rather than silently omitting the turn.
 
@@ -69,7 +82,7 @@ Then either:
 3. choose **Load unpacked**;
 4. select the generated `dist/` directory.
 
-Or unzip `release/chatgpt-conversation-exporter-v0.1.0.zip` and load that directory.
+Or unzip `release/chatgpt-conversation-exporter-v0.2.0.zip` and load that directory.
 
 ## Usage
 
@@ -96,9 +109,11 @@ Key implementation docs:
 
 ## Current limitations
 
-ChatGPT's web UI and metadata endpoints are not public APIs and can change. Rich interactive widgets can only be archived to the extent their visible DOM/text/assets are accessible. Cross-origin protected images or attachments may remain URL references; the export records a warning instead of pretending they were embedded.
+ChatGPT's web UI and metadata endpoints are not public APIs and can change. Rich interactive widgets can only be archived to the extent their visible DOM/text/assets or selected-branch metadata are accessible. Cross-origin protected images or attachments may remain URL/metadata references; the export records a warning instead of pretending they were embedded.
 
-The parser is intentionally modular so future adapters can target Claude, Gemini, Grok, or other chat UIs without changing the export schema.
+Generated file cards are best-effort: when ChatGPT exposes a filename but no retrievable URL, the filename is preserved and the asset is explicitly marked unavailable rather than silently disappearing.
+
+The parser is intentionally modular so future adapters can target Claude, Gemini, Grok, or other chat UIs without changing the overall export model.
 
 ## License
 
