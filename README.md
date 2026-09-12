@@ -2,6 +2,8 @@
 
 A local-first Chromium extension for exporting the **current visible ChatGPT conversation branch** into formats that work well for both humans and AI agents.
 
+**Stable release: v1.0.0** — accepted against a frozen real-world ChatGPT fixture and a final v1.0.0 smoke export. See [Validation](docs/VALIDATION.md) and the [Changelog](CHANGELOG.md).
+
 ## Why this exists
 
 Normal PDF/print exports are convenient for people but poor as a canonical AI handoff. Raw DOM scrapers are better for machines but often lose tables, code, citations, images, timestamps, tool output, long virtualized messages, or branch information.
@@ -94,7 +96,9 @@ Or unzip `release/chatgpt-conversation-exporter-v1.0.0.zip` and load that direct
 
 ## v1.0 validation
 
-The release candidate was exercised against a frozen real ChatGPT fixture containing an uploaded image, uploaded PDF, Markdown table, JavaScript code block, web research, official links, structured tool calls and a generated downloadable text file. The archive preserved both visible turns with zero missing turns, embedded the accessible image locally, kept inaccessible file cards explicitly marked as unavailable, preserved the tool trace separately, produced a consistent ZIP manifest and rendered a valid A4 PDF.
+v1.0.0 was accepted against a frozen real ChatGPT fixture containing an uploaded image, uploaded PDF, Markdown table, JavaScript code block, web research, official links, structured tool calls and a generated downloadable text file. The final smoke export preserved all expected visible turns with zero missing turns, kept tool activity separate, embedded the accessible image locally, preserved unresolved file cards explicitly, retained the JavaScript language label, produced a consistent ZIP manifest and rendered a valid text-selectable A4 PDF.
+
+The complete release gate and the platform boundary around protected file cards are documented in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Development
 
@@ -109,6 +113,8 @@ Key implementation docs:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [JSON schema](docs/SCHEMA.md)
+- [v1.0 validation](docs/VALIDATION.md)
+- [Changelog](CHANGELOG.md)
 - [Privacy](PRIVACY.md)
 
 ## Current limitations
