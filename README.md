@@ -29,13 +29,13 @@ The browser always opens **Save As**.
 - code blocks and inline code;
 - links, citations and full URLs;
 - images and attachments, with local embedding when the browser can access them;
-- file/download widgets even when ChatGPT exposes only a UI control rather than a normal link;
+- file/download widgets plus attachment metadata from the selected visible branch;
 - visible tool, connector and research UI content;
 - visible reasoning summaries/details exposed by ChatGPT's UI;
 - message IDs, turn IDs, model names and timestamps when available;
 - explicit diagnostics when something cannot be recovered.
 
-UI-only chrome such as favicons, app/plugin icons and plugin-pill links is filtered from conversation assets/sources.
+UI-only chrome such as favicons, app/plugin icons, hidden tool widgets and plugin-pill links is filtered from conversation assets/sources. When an asset is embedded in an AI/Complete archive, `chat.md` points to the local `assets/...` copy and `manifest.json` lists the exact files actually present in the ZIP.
 
 It **does not** try to expose hidden chain-of-thought, system/developer prompts, cookies, tokens, or unrelated invisible context.
 
@@ -82,7 +82,7 @@ Then either:
 3. choose **Load unpacked**;
 4. select the generated `dist/` directory.
 
-Or unzip `release/chatgpt-conversation-exporter-v0.2.0.zip` and load that directory.
+Or unzip `release/chatgpt-conversation-exporter-v0.3.0.zip` and load that directory.
 
 ## Usage
 
@@ -111,7 +111,7 @@ Key implementation docs:
 
 ChatGPT's web UI and metadata endpoints are not public APIs and can change. Rich interactive widgets can only be archived to the extent their visible DOM/text/assets or selected-branch metadata are accessible. Cross-origin protected images or attachments may remain URL/metadata references; the export records a warning instead of pretending they were embedded.
 
-Generated file cards are best-effort: when ChatGPT exposes a filename but no retrievable URL, the filename is preserved and the asset is explicitly marked unavailable rather than silently disappearing.
+Generated file cards are best-effort: when ChatGPT exposes a filename but no retrievable URL, the filename is preserved and the asset is explicitly marked unavailable rather than silently disappearing. PDF uses jsPDF's built-in WinAnsi fonts, so a small set of unsupported symbols (for example arrows/checkmarks) is transliterated to readable ASCII equivalents; JSON/Markdown/HTML preserve the original Unicode.
 
 The parser is intentionally modular so future adapters can target Claude, Gemini, Grok, or other chat UIs without changing the overall export model.
 
