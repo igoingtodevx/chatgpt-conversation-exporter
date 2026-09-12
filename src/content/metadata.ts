@@ -195,6 +195,10 @@ export function metadataFallbackMessages(metadata: MetadataConversation): Conver
   for (const [nodeId, node] of selectedMetadataPath(metadata)) {
     const raw = node.message;
     if (!isVisibleConversationMessage(raw)) continue;
+    // Intermediate assistant progress/commentary belongs to the visible reasoning/detail
+    // section of the completed turn, not to the top-level transcript. Keep it out of
+    // messages[] when ChatGPT explicitly marks the metadata record as non-final.
+    if (raw?.author?.role === "assistant" && raw.end_turn === false) continue;
     const role = raw?.author?.role as "user" | "assistant";
     const text = metadataText(node);
     messages.push({
