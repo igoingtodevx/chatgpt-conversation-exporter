@@ -1,5 +1,10 @@
 import { blocksToMarkdown } from "./dom-to-markdown";
 import { sanitizedClone } from "./sanitize";
+import {
+  metadataFallbackMessages,
+  metadataToolTrace,
+  type MetadataConversation
+} from "./metadata";
 import type {
   AssetRef,
   ConversationExport,
@@ -20,6 +25,7 @@ const CONVERSATION_ID_PATTERN = /\/c\/([a-f0-9-]{20,})(?:[/?#]|$)/i;
 const DETAIL_PATTERN = /(thinking|reasoning|analysis|research|searched|searching|worked for|tool|connector|browse|browsing|gedacht|überlegt|analyse|recherche|suche|werkzeug)/i;
 const TOOL_PATTERN = /(tool|connector|browse|search|github|python|terminal|web|file|document|research|werkzeug|suche|datei)/i;
 const REASONING_PATTERN = /(thinking|reasoning|analysis|worked for|gedacht|überlegt|analyse)/i;
+const FILE_NAME_PATTERN = /\.(zip|pdf|docx?|xlsx?|pptx?|csv|tsv|txt|md|json|ya?ml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|java|go|rs|png|jpe?g|webp|gif|svg|mp3|wav|mp4|mov)\b/i;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -51,54 +57,114 @@ function pageTitle(): string {
   return title && title.toLowerCase() !== "chatgpt" ? title : "ChatGPT Conversation";
 }
 
-function toIso(value: unknown): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  const raw = typeof value === "number" ? value : Number(value);
-  const date = Number.isFinite(raw)
-    ? new Date(raw < 1e12 ? raw * 1000 : raw)
-    : new Date(String(value));
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+function blobToDataUrl(blob: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve(null);
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.readAsDataURL(blob);
+  });
 }
 
-async function tryImageDataUrl(url: string): Promise<string | null> {
+async function tryDataUrl(url: string, imageOnly = false): Promise<string | null> {
+  if (!url) return null;
+  if (url.startsWith("data:")) return url;
+  if (!/^(https?:|blob:)/i.test(url)) return null;
   try {
     const response = await fetch(url, { credentials: "include" });
     if (!response.ok) return null;
     const blob = await response.blob();
-    if (!blob.type.startsWith("image/")) return null;
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error);
-      reader.onload = () => resolve(String(reader.result));
-      reader.readAsDataURL(blob);
-    });
+    if (imageOnly && !blob.type.startsWith("image/")) return null;
+    return await blobToDataUrl(blob);
   } catch {
     return null;
   }
 }
 
+function isUiLink(url: string): boolean {
+  try {
+    const parsed = new URL(url, location.href);
+    return parsed.hostname === location.hostname && (
+      parsed.pathname.startsWith("/plugins/") ||
+      parsed.searchParams.get("plugin_detail_origin") === "inline_selection_pill"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function cleanLinkText(value: string, fallback: string): string {
+  const text = normalizeWhitespace(value || fallback)
+    .replace(/\n\+\d+$/g, "")
+    .trim();
+  return text || fallback;
+}
+
 function collectLinks(root: Element): LinkRef[] {
   const links = Array.from(root.querySelectorAll("a[href]"))
-    .map((a) => {
-      const anchor = a as HTMLAnchorElement;
+    .map((node) => {
+      const anchor = node as HTMLAnchorElement;
       const url = anchor.href || anchor.getAttribute("href") || "";
-      const text = normalizeWhitespace(anchor.innerText || anchor.textContent || url);
-      const attachmentish = Boolean(anchor.download) || /download|attachment|file/i.test(`${anchor.dataset.testid || ""} ${anchor.getAttribute("aria-label") || ""}`);
-      const citationish = /citation|source/i.test(`${anchor.dataset.testid || ""} ${anchor.getAttribute("aria-label") || ""}`);
-      return { text: text || url, url, kind: attachmentish ? "attachment" : citationish ? "citation" : "link" } as LinkRef;
+      if (!url || isUiLink(url)) return null;
+      const marker = `${anchor.dataset.testid || ""} ${anchor.getAttribute("aria-label") || ""}`;
+      const attachmentish = Boolean(anchor.download) || /download|attachment|file/i.test(marker);
+      const citationish = /citation|source/i.test(marker);
+      return {
+        text: cleanLinkText(anchor.innerText || anchor.textContent || "", url),
+        url,
+        kind: attachmentish ? "attachment" : citationish ? "citation" : "link"
+      } as LinkRef;
     })
-    .filter((item) => /^(https?:|blob:|data:)/i.test(item.url));
+    .filter((item): item is LinkRef => Boolean(item && /^(https?:|blob:|data:)/i.test(item.url)));
   return uniqueBy(links, (item) => `${item.kind}:${item.url}`);
+}
+
+function isUiImage(img: HTMLImageElement, url: string): boolean {
+  if (/google\.com\/s2\/favicons/i.test(url)) return true;
+  if (/chatgpt\.com\/images\/ecosystem\/apps\//i.test(url)) return true;
+  if (img.closest("[data-inline-selection-pill], [data-testid*='plugin-icon'], [data-testid*='citation']")) return true;
+  return false;
+}
+
+function attachmentNameFromUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url, location.href);
+    return decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "") || null;
+  } catch {
+    return null;
+  }
+}
+
+function fileWidgetName(element: HTMLElement): string {
+  const raw = normalizeWhitespace(
+    element.getAttribute("data-filename") ||
+    element.getAttribute("aria-label") ||
+    element.getAttribute("title") ||
+    element.innerText ||
+    element.textContent ||
+    ""
+  );
+  const match = raw.match(/[^\n]{1,180}\.(?:zip|pdf|docx?|xlsx?|pptx?|csv|tsv|txt|md|json|ya?ml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|java|go|rs|png|jpe?g|webp|gif|svg|mp3|wav|mp4|mov)\b/i);
+  return (match?.[0] || raw).slice(0, 180);
+}
+
+function widgetUrl(element: HTMLElement): string {
+  const anchor = element.matches("a[href]") ? element as HTMLAnchorElement : element.querySelector("a[href]") as HTMLAnchorElement | null;
+  const candidate = anchor?.href || element.getAttribute("data-href") || element.getAttribute("data-url") || "";
+  try {
+    return candidate ? new URL(candidate, location.href).href : "";
+  } catch {
+    return candidate;
+  }
 }
 
 async function collectAssets(root: Element, captureImages: boolean): Promise<AssetRef[]> {
   const assets: AssetRef[] = [];
   const images = Array.from(root.querySelectorAll("img")) as HTMLImageElement[];
-  for (let i = 0; i < images.length; i += 1) {
-    const img = images[i];
+  for (const img of images) {
     const url = img.currentSrc || img.src || "";
-    if (!url || url.startsWith("data:image/svg")) continue;
-    const dataUrl = captureImages && !url.startsWith("data:") ? await tryImageDataUrl(url) : (url.startsWith("data:") ? url : null);
+    if (!url || url.startsWith("data:image/svg") || isUiImage(img, url)) continue;
+    const dataUrl = captureImages ? await tryDataUrl(url, true) : null;
     assets.push({
       id: `image-${crypto.randomUUID()}`,
       kind: "image",
@@ -112,24 +178,45 @@ async function collectAssets(root: Element, captureImages: boolean): Promise<Ass
   }
 
   for (const link of collectLinks(root).filter((item) => item.kind === "attachment")) {
-    let name: string | null = null;
-    try {
-      const parsed = new URL(link.url);
-      name = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "") || null;
-    } catch {
-      name = null;
-    }
+    const dataUrl = await tryDataUrl(link.url);
     assets.push({
       id: `attachment-${crypto.randomUUID()}`,
       kind: "attachment",
-      name: name || link.text || null,
-      mimeType: null,
+      name: attachmentNameFromUrl(link.url) || link.text || null,
+      mimeType: dataUrl?.match(/^data:([^;,]+)/)?.[1] || null,
       url: link.url,
       alt: null,
-      status: "remote"
+      dataUrl,
+      status: dataUrl ? "embedded" : "remote"
     });
   }
-  return uniqueBy(assets, (asset) => `${asset.kind}:${asset.url}`);
+
+  const widgetSelector = [
+    "button", "[role='button']", "[data-testid*='file']", "[data-testid*='attachment']",
+    "[data-testid*='download']", "[data-filename]", "[aria-label*='download' i]", "[aria-label*='attachment' i]"
+  ].join(",");
+  const widgets = Array.from(root.querySelectorAll(widgetSelector)) as HTMLElement[];
+  for (const widget of widgets) {
+    const marker = `${widget.dataset.testid || ""} ${widget.getAttribute("aria-label") || ""} ${widget.getAttribute("data-filename") || ""} ${widget.innerText || ""}`;
+    if (!FILE_NAME_PATTERN.test(marker) && !/download|attachment/i.test(marker)) continue;
+    const name = fileWidgetName(widget);
+    if (!name || (!FILE_NAME_PATTERN.test(name) && !/download|attachment/i.test(marker))) continue;
+    const url = widgetUrl(widget);
+    if (url && isUiLink(url)) continue;
+    const dataUrl = url ? await tryDataUrl(url) : null;
+    assets.push({
+      id: `attachment-${crypto.randomUUID()}`,
+      kind: "attachment",
+      name,
+      mimeType: dataUrl?.match(/^data:([^;,]+)/)?.[1] || null,
+      url,
+      alt: null,
+      dataUrl,
+      status: dataUrl ? "embedded" : (url ? "remote" : "unavailable")
+    });
+  }
+
+  return uniqueBy(assets, (asset) => `${asset.kind}:${asset.url || asset.name || asset.id}`);
 }
 
 function detailType(title: string): DetailSection["type"] {
@@ -149,7 +236,7 @@ async function expandInspectableSections(turn: HTMLElement, enabled: boolean): P
     try {
       element.click();
       changed.push(element);
-      await sleep(80);
+      await sleep(90);
     } catch {
       // Best-effort only; extraction continues.
     }
@@ -168,7 +255,7 @@ async function expandInspectableSections(turn: HTMLElement, enabled: boolean): P
 
 function collectDetails(turn: HTMLElement, primaryRoot: Element): DetailSection[] {
   const results: DetailSection[] = [];
-  const candidates = Array.from(turn.querySelectorAll("details, [data-testid], [aria-label]")) as HTMLElement[];
+  const candidates = Array.from(turn.querySelectorAll("details, [data-testid], [aria-label], [role='region']")) as HTMLElement[];
   for (const node of candidates) {
     if (node === primaryRoot || primaryRoot.contains(node) || node.contains(primaryRoot)) continue;
     const marker = `${node.dataset.testid || ""} ${node.getAttribute("aria-label") || ""} ${node.querySelector("summary")?.textContent || ""}`;
@@ -180,6 +267,12 @@ function collectDetails(turn: HTMLElement, primaryRoot: Element): DetailSection[
     results.push({ type: detailType(title), title, text, html: clone.innerHTML });
   }
   return uniqueBy(results, (item) => `${item.type}:${item.title}:${item.text.slice(0, 100)}`);
+}
+
+function turnIndex(turn: HTMLElement, fallback: number): number {
+  const marker = turn.dataset.testid || turn.getAttribute("data-testid") || "";
+  const match = marker.match(/conversation-turn-(\d+)/i);
+  return match ? Number(match[1]) + 1 : fallback + 1;
 }
 
 async function extractTurn(turn: HTMLElement, index: number, options: ExtractionOptions): Promise<ConversationMessage | null> {
@@ -210,7 +303,7 @@ async function extractTurn(turn: HTMLElement, index: number, options: Extraction
     const messageId = roleNode.dataset.messageId || roleNode.getAttribute("data-message-id") || null;
     return {
       id: messageId || turnId || `dom-${index + 1}`,
-      index: index + 1,
+      index: turnIndex(turn, index),
       turnId,
       messageId,
       role,
@@ -228,24 +321,6 @@ async function extractTurn(turn: HTMLElement, index: number, options: Extraction
   } finally {
     expansion.restore();
   }
-}
-
-interface MetadataNode {
-  id?: string;
-  parent?: string | null;
-  message?: {
-    id?: string;
-    create_time?: unknown;
-    author?: { role?: string };
-    content?: { content_type?: string; parts?: unknown[]; text?: string };
-    metadata?: Record<string, unknown>;
-  } | null;
-}
-
-interface MetadataConversation {
-  title?: string;
-  current_node?: string;
-  mapping?: Record<string, MetadataNode>;
 }
 
 async function fetchMetadata(id: string): Promise<MetadataConversation | null> {
@@ -267,76 +342,13 @@ async function fetchMetadata(id: string): Promise<MetadataConversation | null> {
   }
 }
 
-function selectedMetadataPath(metadata: MetadataConversation): Array<[string, MetadataNode]> {
-  const mapping = metadata.mapping || {};
-  const current = metadata.current_node;
-  if (!current || !mapping[current]) return [];
-  const path: Array<[string, MetadataNode]> = [];
-  const seen = new Set<string>();
-  let id: string | undefined = current;
-  while (id && mapping[id] && !seen.has(id)) {
-    seen.add(id);
-    path.push([id, mapping[id]]);
-    id = mapping[id].parent || undefined;
-  }
-  return path.reverse();
-}
-
-function metadataText(node: MetadataNode): string {
-  const content = node.message?.content;
-  if (!content) return "";
-  if (typeof content.text === "string") return normalizeWhitespace(content.text);
-  if (!Array.isArray(content.parts)) return "";
-  return normalizeWhitespace(content.parts.map((part) => {
-    if (typeof part === "string") return part;
-    if (part && typeof part === "object") {
-      const value = part as Record<string, unknown>;
-      if (typeof value.text === "string") return value.text;
-      if (typeof value.content === "string") return value.content;
-      if (typeof value.name === "string") return `[Attachment: ${value.name}]`;
-    }
-    return "";
-  }).filter(Boolean).join("\n\n"));
-}
-
-function metadataFallbackMessages(metadata: MetadataConversation): ConversationMessage[] {
-  const messages: ConversationMessage[] = [];
-  for (const [nodeId, node] of selectedMetadataPath(metadata)) {
-    const raw = node.message;
-    const role = raw?.author?.role;
-    if (role !== "user" && role !== "assistant") continue;
-    const hidden = raw?.metadata && ["is_visually_hidden_from_conversation", "is_hidden", "hidden", "is_redacted"].some((key) => raw.metadata?.[key] === true);
-    if (hidden) continue;
-    const text = metadataText(node);
-    if (!text) continue;
-    messages.push({
-      id: raw?.id || nodeId,
-      index: messages.length + 1,
-      turnId: nodeId,
-      messageId: raw?.id || null,
-      role,
-      model: typeof raw?.metadata?.model_slug === "string" ? raw.metadata.model_slug : null,
-      createdAt: toIso(raw?.create_time),
-      source: "metadata",
-      text,
-      markdown: text,
-      renderedHtml: "",
-      links: [],
-      assets: [],
-      details: [],
-      diagnostics: ["Message recovered from ChatGPT conversation metadata because rendered DOM content was unavailable."]
-    });
-  }
-  return messages;
-}
-
 function mergeWithMetadata(domMessages: ConversationMessage[], metadata: MetadataConversation | null): ConversationMessage[] {
-  if (!metadata) return domMessages;
+  if (!metadata) return domMessages.sort((a, b) => a.index - b.index).map((message, index) => ({ ...message, index: index + 1 }));
   const fallback = metadataFallbackMessages(metadata);
   const byMessageId = new Map(fallback.filter((m) => m.messageId).map((m) => [m.messageId as string, m]));
   const byTurnId = new Map(fallback.filter((m) => m.turnId).map((m) => [m.turnId as string, m]));
-
   const used = new Set<string>();
+
   const merged = domMessages.map((message) => {
     const meta = (message.messageId && byMessageId.get(message.messageId)) || (message.turnId && byTurnId.get(message.turnId));
     if (!meta) return message;
@@ -348,15 +360,18 @@ function mergeWithMetadata(domMessages: ConversationMessage[], metadata: Metadat
       model: message.model || meta.model
     };
   });
+  for (const meta of fallback) if (!used.has(meta.id)) merged.push(meta);
 
-  for (const meta of fallback) {
-    if (!used.has(meta.id)) merged.push(meta);
-  }
-
-  const order = new Map(fallback.map((m, index) => [m.id, index]));
+  const order = new Map<string, number>();
+  fallback.forEach((message, index) => {
+    order.set(message.id, index);
+    if (message.messageId) order.set(message.messageId, index);
+    if (message.turnId) order.set(message.turnId, index);
+  });
+  const orderOf = (message: ConversationMessage) => order.get(message.messageId || "") ?? order.get(message.turnId || "") ?? order.get(message.id);
   merged.sort((a, b) => {
-    const ai = order.get(a.messageId || a.turnId || a.id);
-    const bi = order.get(b.messageId || b.turnId || b.id);
+    const ai = orderOf(a);
+    const bi = orderOf(b);
     if (ai !== undefined && bi !== undefined) return ai - bi;
     if (ai !== undefined) return -1;
     if (bi !== undefined) return 1;
@@ -366,50 +381,62 @@ function mergeWithMetadata(domMessages: ConversationMessage[], metadata: Metadat
 }
 
 async function scanDom(options: ExtractionOptions): Promise<{ messages: ConversationMessage[]; expected: number; expanded: number }> {
-  const turns = getTurns();
-  if (!turns.length) throw new Error("No ChatGPT conversation turns were found on this page.");
-  const root = getScrollRoot(turns[0]);
+  const initial = getTurns();
+  if (!initial.length) throw new Error("No ChatGPT conversation turns were found on this page.");
+  const root = getScrollRoot(initial[0]);
   const originalTop = root.scrollTop;
   const messages = new Map<string, ConversationMessage>();
   let expanded = 0;
+  let maxObservedTurns = initial.length;
 
   const harvest = async () => {
     const current = getTurns();
+    maxObservedTurns = Math.max(maxObservedTurns, current.length);
     for (let i = 0; i < current.length; i += 1) {
       const turn = current[i];
-      const key = turn.dataset.turnId || turn.getAttribute("data-turn-id") || turn.dataset.testid || `${i}`;
+      const key = turn.dataset.turnId || turn.getAttribute("data-turn-id") || turn.dataset.testid || `${turnIndex(turn, i)}`;
       if (messages.has(key)) continue;
       const message = await extractTurn(turn, i, options);
-      if (message) {
-        messages.set(key, message);
-        const diag = message.diagnostics.find((d) => d.startsWith("Expanded "));
-        if (diag) expanded += Number(diag.match(/Expanded (\d+)/)?.[1] || 0);
-      }
+      if (!message) continue;
+      messages.set(key, message);
+      const diag = message.diagnostics.find((d) => d.startsWith("Expanded "));
+      if (diag) expanded += Number(diag.match(/Expanded (\d+)/)?.[1] || 0);
     }
   };
 
   try {
     await harvest();
     if (options.loadAll) {
-      const stableTurns = getTurns();
-      for (let i = 0; i < stableTurns.length; i += 1) {
-        stableTurns[i].scrollIntoView({ block: "center", behavior: "instant" });
-        await sleep(45);
-        await harvest();
-      }
       root.scrollTo({ top: 0, behavior: "instant" });
-      await sleep(80);
+      await sleep(120);
       await harvest();
-      root.scrollTo({ top: root.scrollHeight, behavior: "instant" });
-      await sleep(80);
-      await harvest();
+      let stablePasses = 0;
+      let previousCount = -1;
+      let previousHeight = -1;
+      for (let pass = 0; pass < 4 && stablePasses < 2; pass += 1) {
+        const height = root.scrollHeight;
+        const maxTop = Math.max(0, height - root.clientHeight);
+        const step = Math.max(420, Math.floor(Math.max(root.clientHeight, 700) * 0.65));
+        for (let top = 0; top <= maxTop; top += step) {
+          root.scrollTo({ top, behavior: "instant" });
+          await sleep(70);
+          await harvest();
+        }
+        root.scrollTo({ top: root.scrollHeight, behavior: "instant" });
+        await sleep(120);
+        await harvest();
+        const unchanged = messages.size === previousCount && Math.abs(root.scrollHeight - previousHeight) < 8;
+        stablePasses = unchanged ? stablePasses + 1 : 0;
+        previousCount = messages.size;
+        previousHeight = root.scrollHeight;
+      }
     }
   } finally {
     root.scrollTo({ top: originalTop, behavior: "instant" });
   }
 
   const output = Array.from(messages.values()).sort((a, b) => a.index - b.index);
-  return { messages: output, expected: turns.length, expanded };
+  return { messages: output, expected: maxObservedTurns, expanded };
 }
 
 export async function extractConversation(options: ExtractionOptions): Promise<ConversationExport> {
@@ -417,23 +444,25 @@ export async function extractConversation(options: ExtractionOptions): Promise<C
   const metadata = id ? await fetchMetadata(id) : null;
   const dom = await scanDom(options);
   const messages = mergeWithMetadata(dom.messages, metadata);
+  const toolTrace = metadata && options.includeTools ? metadataToolTrace(metadata) : [];
 
   if (!options.includeTimestamps) messages.forEach((message) => { message.createdAt = null; });
   if (!options.includeReasoning) messages.forEach((message) => { message.details = message.details.filter((d) => d.type !== "reasoning"); });
   if (!options.includeTools) messages.forEach((message) => { message.details = message.details.filter((d) => d.type !== "tool" && d.type !== "research"); });
 
-  const sources = uniqueBy(messages.flatMap((m) => m.links), (link) => `${link.kind}:${link.url}`);
-  const assets = uniqueBy(messages.flatMap((m) => m.assets), (asset) => `${asset.kind}:${asset.url}`);
+  const sources = uniqueBy(messages.flatMap((m) => m.links).filter((link) => link.kind !== "attachment" && !isUiLink(link.url)), (link) => `${link.kind}:${link.url}`);
+  const assets = uniqueBy(messages.flatMap((m) => m.assets), (asset) => `${asset.kind}:${asset.url || asset.name || asset.id}`);
   const metadataCount = metadata ? metadataFallbackMessages(metadata).length : 0;
-  const missing = Math.max(0, Math.max(dom.expected, metadataCount) - messages.length);
+  const expected = Math.max(dom.expected, metadataCount);
+  const missing = Math.max(0, expected - messages.length);
   const warnings: string[] = [];
   if (!metadata) warnings.push("Structured ChatGPT conversation metadata was unavailable; DOM extraction was used.");
-  if (missing) warnings.push(`${missing} expected turn(s) could not be recovered.`);
-  if (assets.some((asset) => asset.status !== "embedded")) warnings.push("Some assets could not be embedded locally; their original URLs are preserved.");
+  if (missing) warnings.push(`${missing} expected visible turn(s) could not be recovered.`);
+  if (assets.some((asset) => asset.status !== "embedded")) warnings.push("Some conversation assets could not be embedded locally; their available metadata or original URLs are preserved.");
 
   return {
-    schemaVersion: "1.0",
-    generator: { name: "ChatGPT Conversation Exporter", version: "0.1.0" },
+    schemaVersion: "1.1",
+    generator: { name: "ChatGPT Conversation Exporter", version: "0.2.0" },
     conversation: {
       title: metadata?.title || pageTitle(),
       url: location.href,
@@ -442,14 +471,16 @@ export async function extractConversation(options: ExtractionOptions): Promise<C
       branch: "visible-current"
     },
     messages,
+    toolTrace,
     sources,
     assets,
     diagnostics: {
       extractionSource: metadata ? "hybrid" : "dom",
-      expectedTurns: Math.max(dom.expected, metadataCount) || null,
+      expectedTurns: expected || null,
       exportedMessages: messages.length,
       missingTurns: missing,
       expandedSections: dom.expanded,
+      toolTraceEvents: toolTrace.length,
       warnings
     }
   };
