@@ -12,6 +12,7 @@ function message(role: string, text: string, extra: Partial<MetadataMessage> = {
   return {
     id: `${role}-${text.slice(0, 8)}`,
     create_time: 1_700_000_000,
+    end_turn: role === "assistant" ? true : null,
     author: { role },
     content: { content_type: "text", parts: [text] },
     recipient: role === "assistant" ? "all" : null,
@@ -27,13 +28,13 @@ describe("ChatGPT metadata classification", () => {
     expect(isVisibleConversationMessage(message("assistant", "hidden", { metadata: { is_visually_hidden_from_conversation: true } }))).toBe(false);
   });
 
-  it("keeps the current visible branch clean while preserving tool events separately", () => {
+  it("keeps the top-level branch clean while preserving intermediate progress in metadata rather than duplicating it as a message", () => {
     const nodes = [
       ["u1", message("user", "Question")],
-      ["a1", message("assistant", "I will check that")],
-      ["call", message("assistant", '{"repository":"example/repo"}', { recipient: "GitHub" })],
-      ["result", message("tool", '{"ok":true}', { author: { role: "tool", name: "GitHub" }, recipient: "assistant" })],
-      ["a2", message("assistant", "Done")]
+      ["a1", message("assistant", "I will check that", { end_turn: false })],
+      ["call", message("assistant", '{"repository":"example/repo"}', { recipient: "GitHub", end_turn: false })],
+      ["result", message("tool", '{"ok":true}', { author: { role: "tool", name: "GitHub" }, recipient: "assistant", end_turn: null })],
+      ["a2", message("assistant", "Done", { end_turn: true })]
     ] as const;
 
     const mapping: MetadataConversation["mapping"] = {};
@@ -45,7 +46,6 @@ describe("ChatGPT metadata classification", () => {
     const visible = metadataFallbackMessages(metadata);
     expect(visible.map((item) => [item.role, item.text])).toEqual([
       ["user", "Question"],
-      ["assistant", "I will check that"],
       ["assistant", "Done"]
     ]);
 
@@ -106,6 +106,7 @@ describe("ChatGPT metadata classification", () => {
         message: message("assistant", "", {
           id: "call",
           recipient: "web.run",
+          end_turn: false,
           content: { content_type: "text", parts: [""] }
         })
       }

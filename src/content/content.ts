@@ -1,3 +1,4 @@
+import { prunePseudoAttachments } from "./asset-cleanup";
 import { extractConversation } from "./extractor";
 import type { AssetRef, ConversationExport, ExtractResponse, ExtractionOptions } from "../shared/types";
 
@@ -62,6 +63,10 @@ if (!window.__chatgptExporterInstalled) {
           captureImages: true
         };
         const data = await extractConversation(options);
+        const pruned = prunePseudoAttachments(data);
+        if (pruned) {
+          data.diagnostics.warnings.push(`Filtered ${pruned} status UI element(s) that looked like file attachments.`);
+        }
         if (options.captureImages) await embedRemoteAttachments(data);
         sendResponse({ ok: true, data } satisfies ExtractResponse);
       } catch (error) {
