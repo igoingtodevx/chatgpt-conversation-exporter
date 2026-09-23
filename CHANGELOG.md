@@ -2,6 +2,15 @@
 
 All notable changes to ChatGPT Conversation Exporter are documented here.
 
+## 1.0.1 — 2026-09-23
+
+### Fixed
+
+- Restored exports when ChatGPT changes or removes rendered conversation-turn selectors by allowing a metadata-only recovery path.
+- Broadened DOM turn/role detection to tolerate alternate semantic attributes such as `data-role` and `data-message-author`.
+- Fixed diagnostics so metadata-only, DOM-only, and hybrid extraction are reported accurately.
+- Aligned the embedded generator version with the package release version.
+
 ## 1.0.0 — 2026-09-12
 
 First stable release.
