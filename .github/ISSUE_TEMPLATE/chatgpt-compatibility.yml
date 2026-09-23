@@ -1,0 +1,60 @@
+name: ChatGPT compatibility breakage
+description: Report a reproducible export failure after a ChatGPT web UI change
+title: "[compatibility] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a compatibility break. Please keep the report privacy-safe: do not attach conversation text, exports, cookies, access tokens, account data, or full ChatGPT conversation URLs.
+
+  - type: input
+    id: version
+    attributes:
+      label: Exporter version
+      placeholder: "1.0.1"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: "Brave 1.x / Chrome 1xx"
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Exact error shown by the exporter
+      description: Paste only the exporter error/status text. Redact any private content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Describe the steps without including the conversation itself.
+      placeholder: |
+        1. Open an existing /c/... conversation
+        2. Open the extension
+        3. Keep default capture options
+        4. Click Export
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Privacy-safe diagnostics
+      description: If an export was still produced, include only diagnostics such as extractionSource, expectedTurns, exportedMessages, missingTurns, and warning text.
+      render: json
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed conversation content, conversation IDs/URLs, account data, cookies, tokens, credentials, and unredacted exports/screenshots.
+          required: true
