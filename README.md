@@ -2,7 +2,7 @@
 
 A local-first Chromium extension for exporting the **current visible ChatGPT conversation branch** into formats that work well for both humans and AI agents.
 
-**Stable release: v1.0.0** — accepted against a frozen real-world ChatGPT fixture and a final v1.0.0 smoke export. See [Validation](docs/VALIDATION.md) and the [Changelog](CHANGELOG.md).
+**Current version: v1.0.1.** The v1.0 release gate was accepted against a frozen real-world ChatGPT fixture; v1.0.1 adds a metadata-only recovery path after a real ChatGPT DOM compatibility break. See [Validation](docs/VALIDATION.md) and the [Changelog](CHANGELOG.md).
 
 ## Why this exists
 
@@ -59,6 +59,14 @@ ChatGPT virtualizes long conversations. The exporter combines two approaches:
 
 If a visible user/assistant turn cannot be hydrated, metadata text is used as a marked fallback rather than silently omitting the turn.
 
+## Compatibility strategy
+
+ChatGPT's web UI is not a public API, so the exporter assumes selectors and private metadata shapes can change.
+
+The extraction path is deliberately redundant: rendered DOM provides rich structure, selected-branch metadata provides ordering and recovery, and diagnostics record which path actually produced the export. Since v1.0.1, a page with zero recognized rendered turn nodes no longer fails immediately when usable conversation metadata is still available; it falls back to metadata-only recovery.
+
+Compatibility fixes should be driven by reproducible failures and regression tests. If ChatGPT changes again, please use the compatibility issue template and **do not attach private conversations, cookies, access tokens, full conversation URLs, or unredacted exports**.
+
 ## Privacy
 
 The extension has no backend, analytics or telemetry. Export generation is local. It uses only:
@@ -84,7 +92,7 @@ Then either:
 3. choose **Load unpacked**;
 4. select the generated `dist/` directory.
 
-Or unzip `release/chatgpt-conversation-exporter-v1.0.0.zip` and load that directory.
+Or unzip `release/chatgpt-conversation-exporter-v1.0.1.zip` and load that directory.
 
 ## Usage
 
