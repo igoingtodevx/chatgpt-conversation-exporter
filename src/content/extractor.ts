@@ -16,11 +16,20 @@ import type {
 import { normalizeWhitespace, uniqueBy } from "../shared/utils";
 
 const TURN_SELECTORS = [
-  "#thread section[data-turn-id][data-turn]",
-  'article[data-testid^="conversation-turn-"]',
-  "section[data-turn-id]"
+  "#thread [data-turn-id][data-turn]",
+  '[data-testid^="conversation-turn-"]',
+  "[data-turn-id][data-turn]",
+  '[data-turn="user"]',
+  '[data-turn="assistant"]'
 ];
-const ROLE_SELECTOR = "[data-message-author-role]";
+const ROLE_SELECTORS = [
+  "[data-message-author-role]",
+  '[data-role="user"]',
+  '[data-role="assistant"]',
+  '[data-message-author="user"]',
+  '[data-message-author="assistant"]'
+];
+const ROLE_SELECTOR = ROLE_SELECTORS.join(",");
 const CONVERSATION_ID_PATTERN = /\/c\/([a-f0-9-]{20,})(?:[/?#]|$)/i;
 const DETAIL_PATTERN = /(thinking|reasoning|analysis|research|searched|searching|worked for|tool|connector|browse|browsing|gedacht|überlegt|analyse|recherche|suche|werkzeug)/i;
 const TOOL_PATTERN = /(tool|connector|browse|search|github|python|terminal|web|file|document|research|werkzeug|suche|datei)/i;
@@ -34,8 +43,24 @@ function getTurns(): HTMLElement[] {
     const nodes = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
     if (nodes.length) return nodes;
   }
-  return Array.from(document.querySelectorAll(ROLE_SELECTOR))
-    .map((node) => (node.closest("article, section") || node) as HTMLElement);
+  const turns = Array.from(document.querySelectorAll(ROLE_SELECTOR))
+    .map((node) => (node.closest("article, section, [data-turn-id], [data-testid^='conversation-turn-']") || node) as HTMLElement);
+  return Array.from(new Set(turns));
+}
+
+function roleNodeFor(turn: HTMLElement): HTMLElement | null {
+  if (turn.matches(ROLE_SELECTOR)) return turn;
+  return turn.querySelector(ROLE_SELECTOR) as HTMLElement | null;
+}
+
+function roleFor(turn: HTMLElement, roleNode: HTMLElement | null): "user" | "assistant" | "unknown" {
+  const raw = roleNode?.dataset.messageAuthorRole
+    || roleNode?.getAttribute("data-role")
+    || roleNode?.getAttribute("data-message-author")
+    || turn.dataset.turn
+    || turn.getAttribute("data-turn")
+    || "unknown";
+  return raw === "user" || raw === "assistant" ? raw : "unknown";
 }
 
 function getScrollRoot(probe?: HTMLElement | null): HTMLElement {
@@ -321,14 +346,15 @@ function turnIndex(turn: HTMLElement, fallback: number): number {
 }
 
 async function extractTurn(turn: HTMLElement, index: number, options: ExtractionOptions): Promise<ConversationMessage | null> {
-  const roleNode = turn.querySelector(ROLE_SELECTOR) as HTMLElement | null;
-  if (!roleNode) return null;
-  const roleRaw = roleNode.dataset.messageAuthorRole || turn.dataset.turn || "unknown";
-  const role = roleRaw === "user" || roleRaw === "assistant" ? roleRaw : "unknown";
-  const primaryRoot = roleNode.querySelector(".markdown")
-    || roleNode.querySelector('[data-testid="collapsible-user-message-content"]')
-    || roleNode.querySelector(".whitespace-pre-wrap")
-    || roleNode;
+  const roleNode = roleNodeFor(turn);
+  const role = roleFor(turn, roleNode);
+  if (role === "unknown") return null;
+  const messageRoot = roleNode || turn;
+  const primaryRoot = messageRoot.querySelector(".markdown")
+    || messageRoot.querySelector(".prose")
+    || messageRoot.querySelector('[data-testid="collapsible-user-message-content"]')
+    || messageRoot.querySelector(".whitespace-pre-wrap")
+    || messageRoot;
 
   const expansion = await expandInspectableSections(turn, options.includeReasoning || options.includeTools);
   try {
@@ -345,14 +371,17 @@ async function extractTurn(turn: HTMLElement, index: number, options: Extraction
     if (!markdown && !text && !assets.length && !details.length) return null;
 
     const turnId = turn.dataset.turnId || turn.getAttribute("data-turn-id") || null;
-    const messageId = roleNode.dataset.messageId || roleNode.getAttribute("data-message-id") || null;
+    const messageId = messageRoot.dataset.messageId
+      || messageRoot.getAttribute("data-message-id")
+      || messageRoot.getAttribute("data-message-uuid")
+      || null;
     return {
       id: messageId || turnId || `dom-${index + 1}`,
       index: turnIndex(turn, index),
       turnId,
       messageId,
       role,
-      model: roleNode.dataset.messageModelSlug || roleNode.getAttribute("data-message-model-slug") || null,
+      model: messageRoot.dataset.messageModelSlug || messageRoot.getAttribute("data-message-model-slug") || null,
       createdAt: null,
       source: "dom",
       text: text || markdown,
@@ -428,7 +457,7 @@ function mergeWithMetadata(domMessages: ConversationMessage[], metadata: Metadat
 
 async function scanDom(options: ExtractionOptions): Promise<{ messages: ConversationMessage[]; expected: number; expanded: number }> {
   const initial = getTurns();
-  if (!initial.length) throw new Error("No ChatGPT conversation turns were found on this page.");
+  if (!initial.length) return { messages: [], expected: 0, expanded: 0 };
   const root = getScrollRoot(initial[0]);
   const originalTop = root.scrollTop;
   const messages = new Map<string, ConversationMessage>();
@@ -488,7 +517,11 @@ async function scanDom(options: ExtractionOptions): Promise<{ messages: Conversa
 export async function extractConversation(options: ExtractionOptions): Promise<ConversationExport> {
   const id = conversationId();
   const metadata = id ? await fetchMetadata(id) : null;
+  const metadataMessages = metadata ? metadataFallbackMessages(metadata) : [];
   const dom = await scanDom(options);
+  if (!dom.messages.length && !metadataMessages.length) {
+    throw new Error("No ChatGPT conversation could be recovered from this page. Open a saved conversation and try again.");
+  }
   const messages = mergeWithMetadata(dom.messages, metadata);
   const toolTrace = metadata && options.includeTools ? metadataToolTrace(metadata) : [];
 
@@ -498,17 +531,20 @@ export async function extractConversation(options: ExtractionOptions): Promise<C
 
   const sources = uniqueBy(messages.flatMap((m) => m.links).filter((link) => link.kind !== "attachment" && !isUiLink(link.url)), (link) => `${link.kind}:${link.url}`);
   const assets = uniqueBy(messages.flatMap((m) => m.assets), (asset) => `${asset.kind}:${asset.url || asset.name || asset.id}`);
-  const metadataCount = metadata ? metadataFallbackMessages(metadata).length : 0;
+  const metadataCount = metadataMessages.length;
   const expected = Math.max(dom.expected, metadataCount);
   const missing = Math.max(0, expected - messages.length);
   const warnings: string[] = [];
   if (!metadata) warnings.push("Structured ChatGPT conversation metadata was unavailable; DOM extraction was used.");
+  if (!dom.messages.length && metadataMessages.length) {
+    warnings.push("Rendered ChatGPT turn selectors returned no messages; export was recovered entirely from conversation metadata.");
+  }
   if (missing) warnings.push(`${missing} expected visible turn(s) could not be recovered.`);
   if (assets.some((asset) => asset.status !== "embedded")) warnings.push("Some conversation assets could not be embedded locally; their available metadata or original URLs are preserved.");
 
   return {
     schemaVersion: "1.1",
-    generator: { name: "ChatGPT Conversation Exporter", version: "0.3.0" },
+    generator: { name: "ChatGPT Conversation Exporter", version: "1.0.1" },
     conversation: {
       title: metadata?.title || pageTitle(),
       url: location.href,
@@ -521,7 +557,11 @@ export async function extractConversation(options: ExtractionOptions): Promise<C
     sources,
     assets,
     diagnostics: {
-      extractionSource: metadata ? "hybrid" : "dom",
+      extractionSource: metadataMessages.length && dom.messages.length
+        ? "hybrid"
+        : metadataMessages.length
+          ? "metadata"
+          : "dom",
       expectedTurns: expected || null,
       exportedMessages: messages.length,
       missingTurns: missing,
